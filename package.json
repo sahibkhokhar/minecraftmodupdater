@@ -1,0 +1,27 @@
+{
+  "name": "minecraft-mod-updater",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "modpack": "src/index.ts"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json && node ./scripts/make-exec.cjs"
+  },
+  "dependencies": {
+    "prompts": "^2.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "@types/prompts": "^2.4.9",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18.17"
+  }
+}
+
