@@ -2,30 +2,25 @@
 
 I got tired of manually updating my mods and stuff for servers, so I made this for myself.
 
-Command-line tool to search Modrinth for mods by Minecraft version and loader, download the newest compatible files into a pack folder, view packs, check compatibility for a new version, and perform full pack updates to a new Minecraft version.
+Search Modrinth by Minecraft version and loader, build packs, view them, check compatibility across versions, and update packs.
 
-### Requirements
+### Quick start
 - Node.js >= 18.17
 - pnpm
 
-### Install
 ```bash
 pnpm install
-```
-
-### Run
-```bash
 pnpm start
 ```
 
-### What it does
-- Create a pack: choose a pack name, loader (Fabric/NeoForge/Forge/Quilt), and Minecraft version. Search for mods and add them; newest compatible files are downloaded into `packs/<name>-<version>-<loader>/mods`. A `modpack.json` is saved with mod metadata.
-- Add mods to an existing pack: select a pack and search to add more mods. Search results automatically exclude mods already in the pack.
-- View a pack: open any existing pack folder and list its mods.
-- Check compatibility (no download): pick a pack and a target Minecraft version to see which mods are compatible and which are not, without creating a new pack or downloading files.
-- Update a pack: select a pack, choose a new Minecraft version, see which mods are incompatible, and optionally proceed. A new pack folder is created with compatible mods downloaded.
+### Menu actions
+- Create pack: pick name, loader (Fabric/NeoForge/Forge/Quilt), and MC version. Search and add mods; newest compatible files are downloaded. Saves metadata to `modpack.json`.
+- Add mods to existing pack: search and add more; results exclude mods already present.
+- View pack: list all mods in a pack.
+- Check compatibility (no download): select a target MC version to see which mods are compatible/incompatible without downloading.
+- Update pack: create a new pack folder for a target MC version; incompatible mods are listed and skipped.
 
-### Pack structure
+### Pack layout
 ```
 packs/
   <packName>-<mcVersion>-<loader>/
@@ -35,7 +30,5 @@ packs/
 ```
 
 ### Notes
-- Uses Modrinth API v2. Loader and version filters are applied when searching and when selecting the latest compatible version for each mod.
-- If a mod has no compatible version, it’s listed as incompatible during update and excluded unless you cancel the update.
-
-
+- Uses Modrinth API v2; filters by loader and version.
+- You can also choose “Choose by path...” to point at any existing `modpack.json`.
