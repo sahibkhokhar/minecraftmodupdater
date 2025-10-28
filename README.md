@@ -1,5 +1,7 @@
 ## Minecraft Mod Updater (CLI)
 
+I got tired of manually updating my mods and stuff for servers, so I made this for myself.
+
 Command-line tool to search Modrinth for mods by Minecraft version and loader, download the newest compatible files into a pack folder, view packs, and perform full pack updates to a new Minecraft version.
 
 ### Requirements
