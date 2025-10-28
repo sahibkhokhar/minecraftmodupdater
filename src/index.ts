@@ -362,6 +362,43 @@ async function updatePack(): Promise<void> {
   console.log(`\nSaved updated pack at: ${newPackDir}`);
 }
 
+async function checkCompatibility(): Promise<void> {
+  const currentDir = await pickPackDir("Select a pack to check");
+  if (!currentDir) return;
+  const current = await readPackMeta(currentDir);
+  console.log(`\nChecking: ${current.packName} (${current.loader}, ${current.minecraftVersion})`);
+  const targetVersion = await promptMinecraftVersion();
+
+  const results: Array<{ mod: PackMod; latest: ModrinthProjectVersion | null }> = [];
+  for (const mod of current.mods) {
+    const latest = await getLatestCompatibleVersion(mod.projectId || mod.slug, targetVersion, current.loader);
+    results.push({ mod, latest });
+  }
+
+  const compatible = results.filter(r => !!r.latest);
+  const incompatible = results.filter(r => !r.latest);
+
+  console.log(`\nTarget: ${targetVersion} (${current.loader})`);
+  if (compatible.length) {
+    console.log("\nCompatible:");
+    for (const r of compatible) {
+      const latest = r.latest!;
+      console.log(`- ${r.mod.title} → ${latest.version_number}`);
+    }
+  } else {
+    console.log("\nCompatible: (none)");
+  }
+
+  if (incompatible.length) {
+    console.log("\nIncompatible:");
+    for (const r of incompatible) console.log(`- ${r.mod.title}`);
+  } else {
+    console.log("\nIncompatible: (none)");
+  }
+
+  console.log(`\nSummary: ${compatible.length} compatible, ${incompatible.length} incompatible, total ${results.length}.`);
+}
+
 async function addModsToPack(): Promise<void> {
   const dir = await pickPackDir("Select a pack to add mods to");
   if (!dir) return;
@@ -433,6 +470,7 @@ async function main(): Promise<void> {
       { title: "Add mods to existing pack", value: "add-mods" },
       { title: "View existing pack", value: "view" },
       { title: "Update existing pack", value: "update" },
+      { title: "Check compatibility (no download)", value: "check" },
       { title: "Exit", value: "exit" }
     ]
   });
@@ -444,6 +482,8 @@ async function main(): Promise<void> {
     await viewPack();
   } else if (action === "update") {
     await updatePack();
+  } else if (action === "check") {
+    await checkCompatibility();
   }
 }
 

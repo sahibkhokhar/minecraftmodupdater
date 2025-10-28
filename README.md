@@ -2,7 +2,7 @@
 
 I got tired of manually updating my mods and stuff for servers, so I made this for myself.
 
-Command-line tool to search Modrinth for mods by Minecraft version and loader, download the newest compatible files into a pack folder, view packs, and perform full pack updates to a new Minecraft version.
+Command-line tool to search Modrinth for mods by Minecraft version and loader, download the newest compatible files into a pack folder, view packs, check compatibility for a new version, and perform full pack updates to a new Minecraft version.
 
 ### Requirements
 - Node.js >= 18.17
@@ -22,6 +22,7 @@ pnpm start
 - Create a pack: choose a pack name, loader (Fabric/NeoForge/Forge/Quilt), and Minecraft version. Search for mods and add them; newest compatible files are downloaded into `packs/<name>-<version>-<loader>/mods`. A `modpack.json` is saved with mod metadata.
 - Add mods to an existing pack: select a pack and search to add more mods. Search results automatically exclude mods already in the pack.
 - View a pack: open any existing pack folder and list its mods.
+- Check compatibility (no download): pick a pack and a target Minecraft version to see which mods are compatible and which are not, without creating a new pack or downloading files.
 - Update a pack: select a pack, choose a new Minecraft version, see which mods are incompatible, and optionally proceed. A new pack folder is created with compatible mods downloaded.
 
 ### Pack structure
