@@ -16,6 +16,7 @@ pnpm start
 ### Menu actions
 - Create pack: pick name, loader (Fabric/NeoForge/Forge/Quilt), and MC version. Search and add mods; newest compatible files are downloaded. Saves metadata to `modpack.json`.
 - Add mods to existing pack: search and add more; results exclude mods already present.
+- Remove mods from existing pack: select mods to delete; removes files and updates `modpack.json`.
 - View pack: list all mods in a pack.
 - Check compatibility (no download): select a target MC version to see which mods are compatible/incompatible without downloading.
 - Update pack: create a new pack folder for a target MC version; incompatible mods are listed and skipped.

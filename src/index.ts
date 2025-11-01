@@ -459,6 +459,56 @@ async function addModsToPack(): Promise<void> {
   }
 }
 
+async function removeModsFromPack(): Promise<void> {
+  const dir = await pickPackDir("Select a pack to remove mods from");
+  if (!dir) return;
+  const meta = await readPackMeta(dir);
+  if (!meta.mods.length) {
+    console.log("(no mods)");
+    return;
+  }
+
+  const choices = meta.mods.map((m, idx) => ({
+    title: `${m.title} @ ${m.versionNumber} (${m.fileName})`,
+    value: idx
+  }));
+  const { indexes } = await prompts({
+    type: "multiselect",
+    name: "indexes",
+    message: "Select mods to remove",
+    choices,
+    instructions: false,
+    min: 1
+  });
+  if (!indexes || !(indexes as number[]).length) return;
+
+  const toRemove = new Set<number>((indexes as number[]) ?? []);
+  const modsDir = path.join(dir, "mods");
+  const removedTitles: string[] = [];
+  const kept: typeof meta.mods = [];
+
+  for (let i = 0; i < meta.mods.length; i++) {
+    const mod = meta.mods[i];
+    if (toRemove.has(i)) {
+      const filePath = path.join(modsDir, mod.fileName);
+      try {
+        await fs.promises.unlink(filePath);
+      } catch {
+        // ignore if file is already missing
+      }
+      removedTitles.push(mod.title);
+    } else {
+      kept.push(mod);
+    }
+  }
+
+  meta.mods = kept;
+  await fs.promises.writeFile(path.join(dir, META_FILENAME), JSON.stringify(meta, null, 2), "utf8");
+
+  console.log(`Removed ${removedTitles.length} mod(s):`);
+  for (const t of removedTitles) console.log(`- ${t}`);
+}
+
 async function main(): Promise<void> {
   await ensureDir(ROOT_PACKS_DIR);
   const { action } = await prompts({
@@ -468,6 +518,7 @@ async function main(): Promise<void> {
     choices: [
       { title: "Create new pack", value: "create" },
       { title: "Add mods to existing pack", value: "add-mods" },
+      { title: "Remove mods from existing pack", value: "remove-mods" },
       { title: "View existing pack", value: "view" },
       { title: "Update existing pack", value: "update" },
       { title: "Check compatibility (no download)", value: "check" },
@@ -478,6 +529,8 @@ async function main(): Promise<void> {
     await createPack();
   } else if (action === "add-mods") {
     await addModsToPack();
+  } else if (action === "remove-mods") {
+    await removeModsFromPack();
   } else if (action === "view") {
     await viewPack();
   } else if (action === "update") {
