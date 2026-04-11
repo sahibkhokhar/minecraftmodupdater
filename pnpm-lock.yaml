@@ -15,6 +15,9 @@ importers:
       '@types/node':
         specifier: ^22.7.5
         version: 22.18.12
+      '@types/prompts':
+        specifier: ^2.4.9
+        version: 2.4.9
       tsx:
         specifier: ^4.19.0
         version: 4.20.6
@@ -183,6 +186,9 @@ packages:
   '@types/node@22.18.12':
     resolution: {integrity: sha512-BICHQ67iqxQGFSzfCFTT7MRQ5XcBjG5aeKh5Ok38UBbPe5fxTyE+aHFxwVrGyr8GNlqFMLKD1D3P2K/1ks8tog==}
 
+  '@types/prompts@2.4.9':
+    resolution: {integrity: sha512-qTxFi6Buiu8+50/+3DGIWLHM6QuWsEKugJnnP6iv2Mc4ncxE4A/OJkjuVOA+5X0X1S/nq5VJRa8Lu+nwcvbrKA==}
+
   esbuild@0.25.11:
     resolution: {integrity: sha512-KohQwyzrKTQmhXDW1PjCv3Tyspn9n5GcY2RTDqeORIdIJY8yKIF7sTSopFmn/wpMPW4rdPXI0UE5LJLuq3bx0Q==}
     engines: {node: '>=18'}
@@ -306,6 +312,11 @@ snapshots:
   '@types/node@22.18.12':
     dependencies:
       undici-types: 6.21.0
+
+  '@types/prompts@2.4.9':
+    dependencies:
+      '@types/node': 22.18.12
+      kleur: 3.0.3
 
   esbuild@0.25.11:
     optionalDependencies:
