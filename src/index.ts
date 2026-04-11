@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream";
 import { promisify } from "node:util";
+import { inflateRawSync } from "node:zlib";
 import prompts from "prompts";
 
 const streamPipeline = promisify(pipeline);
@@ -509,6 +510,225 @@ async function removeModsFromPack(): Promise<void> {
   for (const t of removedTitles) console.log(`- ${t}`);
 }
 
+// ---- mrpack import ----
+
+type MrpackIndex = {
+  dependencies: { minecraft: string; neoforge?: string; fabric?: string; forge?: string };
+  files: Array<{
+    path: string;
+    downloads: string[];
+    env?: { client: string; server: string };
+  }>;
+};
+
+function extractProjectIdFromUrl(url: string): string | null {
+  // https://cdn.modrinth.com/data/PROJECT_ID/versions/VERSION_ID/file.jar
+  const m = url.match(/cdn\.modrinth\.com\/data\/([^/]+)\/versions\/([^/]+)\//);
+  return m ? m[1] : null;
+}
+
+async function getLatestCompatibleVersionBatch(
+  projectIds: string[],
+  minecraftVersion: string,
+  loader: Loader,
+  concurrency = 8
+): Promise<Map<string, ModrinthProjectVersion | null>> {
+  const results = new Map<string, ModrinthProjectVersion | null>();
+  const chunks: string[][] = [];
+  for (let i = 0; i < projectIds.length; i += concurrency) {
+    chunks.push(projectIds.slice(i, i + concurrency));
+  }
+  for (const chunk of chunks) {
+    await Promise.all(
+      chunk.map(async (id) => {
+        try {
+          const v = await getLatestCompatibleVersion(id, minecraftVersion, loader);
+          results.set(id, v);
+        } catch {
+          results.set(id, null);
+        }
+      })
+    );
+  }
+  return results;
+}
+
+async function readMrpackIndex(mrpackPath: string): Promise<MrpackIndex> {
+  // .mrpack is a zip. Read modrinth.index.json from it using node streams.
+  return new Promise((resolve, reject) => {
+    const fileStream = fs.createReadStream(mrpackPath);
+    // Use a simple zip reader approach: buffer the whole file and find modrinth.index.json
+    const chunks: Buffer[] = [];
+    fileStream.on("data", (c: Buffer) => chunks.push(c));
+    fileStream.on("error", reject);
+    fileStream.on("end", () => {
+      const buf = Buffer.concat(chunks);
+      // Find the local file header for modrinth.index.json (PK\x03\x04 signature)
+      // Use the end-of-central-directory to walk entries properly
+      try {
+        const json = extractFileFromZip(buf, "modrinth.index.json");
+        if (!json) throw new Error("modrinth.index.json not found in mrpack");
+        resolve(JSON.parse(json) as MrpackIndex);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
+
+function extractFileFromZip(buf: Buffer, targetName: string): string | null {
+  // Walk local file headers (PK\x03\x04)
+  let i = 0;
+  while (i < buf.length - 4) {
+    if (buf[i] === 0x50 && buf[i + 1] === 0x4b && buf[i + 2] === 0x03 && buf[i + 3] === 0x04) {
+      const compression = buf.readUInt16LE(i + 8);
+      const compressedSize = buf.readUInt32LE(i + 18);
+      const fileNameLength = buf.readUInt16LE(i + 26);
+      const extraFieldLength = buf.readUInt16LE(i + 28);
+      const fileName = buf.subarray(i + 30, i + 30 + fileNameLength).toString("utf8");
+      const dataStart = i + 30 + fileNameLength + extraFieldLength;
+      const dataEnd = dataStart + compressedSize;
+
+      if (fileName === targetName) {
+        const compData = buf.subarray(dataStart, dataEnd);
+        if (compression === 0) {
+          return compData.toString("utf8");
+        } else if (compression === 8) {
+          // DEFLATE
+          const inflated = inflateRawSync(compData);
+          return inflated.toString("utf8");
+        }
+      }
+      i = dataEnd;
+    } else {
+      i++;
+    }
+  }
+  return null;
+}
+
+async function importFromMrpack(): Promise<void> {
+  const { mrpackPath } = await prompts({
+    type: "text",
+    name: "mrpackPath",
+    message: "Path to .mrpack file",
+    validate: (v: string) => (v && fs.existsSync(v.trim()) ? true : "File not found")
+  });
+  if (!mrpackPath) return;
+
+  let index: MrpackIndex;
+  try {
+    index = await readMrpackIndex(mrpackPath.trim());
+  } catch (e) {
+    console.error("Failed to read mrpack:", e);
+    return;
+  }
+
+  console.log(`\nSource pack: Minecraft ${index.dependencies.minecraft}`);
+  console.log(`Found ${index.files.length} mods in mrpack.`);
+
+  const loader = await promptLoader();
+  const mcVersion = await promptMinecraftVersion(index.dependencies.minecraft);
+  const packNameRaw = await promptPackName();
+  const packName = sanitizeName(packNameRaw);
+
+  // Extract project IDs from download URLs
+  const projectIds: string[] = [];
+  const skipped: string[] = [];
+  for (const f of index.files) {
+    // Skip server-unsupported client-only mods if running a server pack
+    const id = extractProjectIdFromUrl(f.downloads[0]);
+    if (id) {
+      projectIds.push(id);
+    } else {
+      skipped.push(f.path);
+    }
+  }
+
+  console.log(`\nChecking ${projectIds.length} mods for ${loader} ${mcVersion}...`);
+  const results = await getLatestCompatibleVersionBatch(projectIds, mcVersion, loader);
+
+  const compatible: Array<{ id: string; version: ModrinthProjectVersion }> = [];
+  const incompatible: string[] = [];
+
+  for (const [id, ver] of results) {
+    if (ver) compatible.push({ id, version: ver });
+    else incompatible.push(id);
+  }
+
+  console.log(`\nCompatible: ${compatible.length}/${projectIds.length}`);
+  if (incompatible.length) {
+    console.log(`Incompatible/not found for ${loader} ${mcVersion}: ${incompatible.length}`);
+    for (const id of incompatible) {
+      // Try to find a display name from the mrpack
+      const match = index.files.find(f => extractProjectIdFromUrl(f.downloads[0]) === id);
+      console.log(`  - ${match?.path.split("/").pop() ?? id}`);
+    }
+  }
+
+  const { proceed } = await prompts({
+    type: "confirm",
+    name: "proceed",
+    message: `Download ${compatible.length} compatible mods?`,
+    initial: true
+  });
+  if (!proceed) return;
+
+  const packDir = path.join(ROOT_PACKS_DIR, `${packName}-${mcVersion}-${loader}`);
+  const modsDir = path.join(packDir, "mods");
+  await ensureDir(modsDir);
+
+  const meta: PackMeta = {
+    packName,
+    minecraftVersion: mcVersion,
+    loader,
+    createdAt: new Date().toISOString(),
+    mods: [],
+    source: "modrinth",
+    incompatible: {}
+  };
+
+  // Download in batches
+  const downloadChunks: typeof compatible[] = [];
+  for (let i = 0; i < compatible.length; i += 4) downloadChunks.push(compatible.slice(i, i + 4));
+
+  for (const chunk of downloadChunks) {
+    await Promise.all(
+      chunk.map(async ({ id, version }) => {
+        const file = selectPrimaryFile(version.files);
+        if (!file) return;
+        const destPath = path.join(modsDir, file.filename);
+        try {
+          await downloadFile(file.url, destPath);
+          // Get project info for title/slug
+          const match = index.files.find(f => extractProjectIdFromUrl(f.downloads[0]) === id);
+          const title = match?.path.split("/").pop()?.replace(/\.jar$/, "") ?? id;
+          meta.mods.push({
+            projectId: id,
+            slug: id,
+            title,
+            versionId: version.id,
+            versionNumber: version.version_number,
+            fileName: file.filename,
+            downloadUrl: file.url
+          });
+          console.log(`  ✓ ${file.filename}`);
+        } catch (e) {
+          console.error(`  ✗ Failed: ${file.filename} — ${e}`);
+        }
+      })
+    );
+  }
+
+  for (const id of incompatible) {
+    meta.incompatible![id] = id;
+  }
+
+  await fs.promises.writeFile(path.join(packDir, META_FILENAME), JSON.stringify(meta, null, 2), "utf8");
+  console.log(`\nDone! ${meta.mods.length} mods saved to: ${packDir}`);
+  console.log("You can now use 'Add mods to existing pack' to add more mods.");
+}
+
 async function main(): Promise<void> {
   await ensureDir(ROOT_PACKS_DIR);
   const { action } = await prompts({
@@ -517,16 +737,19 @@ async function main(): Promise<void> {
     message: "What do you want to do?",
     choices: [
       { title: "Create new pack", value: "create" },
+      { title: "Import from .mrpack file", value: "import-mrpack" },
       { title: "Add mods to existing pack", value: "add-mods" },
       { title: "Remove mods from existing pack", value: "remove-mods" },
       { title: "View existing pack", value: "view" },
-      { title: "Update existing pack", value: "update" },
+      { title: "Update existing pack (new MC version)", value: "update" },
       { title: "Check compatibility (no download)", value: "check" },
       { title: "Exit", value: "exit" }
     ]
   });
   if (action === "create") {
     await createPack();
+  } else if (action === "import-mrpack") {
+    await importFromMrpack();
   } else if (action === "add-mods") {
     await addModsToPack();
   } else if (action === "remove-mods") {
