@@ -239,12 +239,41 @@ export async function multiSelect<T>(
   return selected as T[];
 }
 
+// ── Server pack target picker ─────────────────────────────────────────────────
+
+export type ServerPackTarget = "linux-graalvm" | "linux-openjdk" | "windows-openjdk";
+
+export async function pickServerPackTarget(): Promise<ServerPackTarget | BackSignal> {
+  const { target } = await prompts({
+    type: "select",
+    name: "target",
+    message: "Target platform / JVM",
+    choices: [
+      {
+        title: clr.brightGreen("  Linux  +  GraalVM JDK 24+") + clr.muted("  (recommended — best performance)"),
+        value: "linux-graalvm",
+      },
+      {
+        title: clr.cyan("  Linux  +  OpenJDK 21") + clr.muted("  (standard, no GraalVM needed)"),
+        value: "linux-openjdk",
+      },
+      {
+        title: clr.brightYellow("  Windows  +  OpenJDK 21") + clr.muted("  (no large-pages, no GraalVM)"),
+        value: "windows-openjdk",
+      },
+      { title: clr.muted("  ← Back"), value: BACK },
+    ],
+  });
+  return (target as ServerPackTarget | BackSignal) ?? BACK;
+}
+
 // ── Main menu ─────────────────────────────────────────────────────────────────
 
 export type MainMenuAction =
   | "create"
   | "import-mrpack"
   | "export-mrpack"
+  | "export-server"
   | "add-mods"
   | "remove-mods"
   | "view"
@@ -252,6 +281,7 @@ export type MainMenuAction =
   | "check"
   | "rename"
   | "mod-updates"
+  | "sync"
   | "preview-search"
   | "settings"
   | "exit";
@@ -264,7 +294,8 @@ export async function mainMenu(): Promise<MainMenuAction | null> {
     choices: [
       { title: clr.brightGreen("  Create new pack"), value: "create" },
       { title: clr.brightCyan("  Import .mrpack file"), value: "import-mrpack" },
-      { title: clr.cyan("  Export pack to .mrpack"), value: "export-mrpack" },
+      { title: clr.cyan("  Export pack → .mrpack  ") + clr.muted("(Prism / ATLauncher)"), value: "export-mrpack" },
+      { title: clr.cyan("  Export pack → server .zip"), value: "export-server" },
       { title: "  ─────────────────────", value: "__sep__", disabled: true },
       { title: "  Add mods to pack", value: "add-mods" },
       { title: "  Remove mods from pack", value: "remove-mods" },
@@ -274,6 +305,7 @@ export async function mainMenu(): Promise<MainMenuAction | null> {
       { title: "  Update pack (new MC version)", value: "update" },
       { title: "  Check compatibility", value: "check" },
       { title: clr.brightYellow("  Check for mod updates"), value: "mod-updates" },
+      { title: clr.brightMagenta("  Sync / download missing mods"), value: "sync" },
       { title: "  ─────────────────────", value: "__sep3__", disabled: true },
       { title: "  Search & preview mods", value: "preview-search" },
       { title: "  Settings", value: "settings" },

@@ -28,6 +28,7 @@ import {
 } from "./core/packManager.js";
 import { downloadFile, downloadBatch } from "./core/downloader.js";
 import { readMrpackIndex, extractProjectIdFromUrl, exportToMrpack } from "./core/mrpack.js";
+import { exportToServerZip } from "./core/serverpack.js";
 import { findMissingDeps, installDep } from "./core/deps.js";
 
 // Config
@@ -70,6 +71,7 @@ import {
   pickPackName,
   pickPack,
   pickSearchResult,
+  pickServerPackTarget,
   confirm,
   inputText,
   multiSelect,
@@ -667,6 +669,87 @@ async function actionCheckModUpdates(): Promise<void> {
   printSuccess(`Pack metadata saved.`);
 }
 
+// ── Sync / download missing mods ─────────────────────────────────────────────
+
+async function actionSyncMods(): Promise<void> {
+  printSectionHeader("Sync / Download Missing Mods");
+  const dir = await pickPack("Select a pack");
+  if (dir === BACK) return;
+
+  let meta: PackMeta;
+  try {
+    meta = await readPackMeta(dir);
+  } catch (e) {
+    printError(`Could not read pack: ${e}`);
+    return;
+  }
+
+  if (!meta.mods.length) {
+    printWarn("This pack has no mods in its metadata.");
+    return;
+  }
+
+  blank();
+  printInfo(
+    `${clr.highlight(meta.packName)}  ${clr.muted(`${meta.loader} · ${meta.minecraftVersion} · ${meta.mods.length} mods`)}`
+  );
+
+  // Find which mods are missing their .jar file on disk
+  const mDir = modsDir(dir);
+  await ensureDir(mDir);
+
+  const missing = meta.mods.filter((m) => {
+    const filePath = path.join(mDir, m.fileName);
+    return !fs.existsSync(filePath);
+  });
+
+  if (!missing.length) {
+    blank();
+    printSuccess("All mods are already downloaded — nothing to sync.");
+    return;
+  }
+
+  blank();
+  printInfo(`${clr.brightYellow(String(missing.length))} of ${meta.mods.length} mod file(s) missing:`);
+  for (const m of missing) {
+    console.log(`  ${clr.muted("–")} ${clr.bold(m.title)}  ${clr.muted(m.fileName)}`);
+  }
+  blank();
+
+  const proceed = await confirm(`Download ${missing.length} missing mod(s)?`);
+  if (!proceed) return;
+
+  const items = missing.map((m) => ({
+    url: m.downloadUrl,
+    destPath: path.join(mDir, m.fileName),
+    label: m.title,
+  }));
+
+  blank();
+  const dlResults = await downloadBatch(items, getConcurrency(), (done, total, result) => {
+    writeProgress(renderProgressBar(done, total) + "  " + clr.muted(result.fileName));
+  });
+  clearProgress();
+
+  let failed = 0;
+  for (let i = 0; i < missing.length; i++) {
+    const res = dlResults[i];
+    if (res?.ok) {
+      printSuccess(`${clr.bold(missing[i].title)}  ${clr.muted(missing[i].fileName)}`);
+    } else {
+      printError(`Failed: ${missing[i].title}  ${clr.muted(res?.error ?? "unknown error")}`);
+      failed++;
+    }
+  }
+
+  blank();
+  if (failed === 0) {
+    printSuccess(`All ${missing.length} mod(s) downloaded successfully.`);
+  } else {
+    printWarn(`${missing.length - failed} downloaded, ${failed} failed.`);
+  }
+}
+
 // ── Import .mrpack ────────────────────────────────────────────────────────────
 
 async function actionImportMrpack(): Promise<void> {
@@ -853,6 +936,87 @@ async function actionExportMrpack(): Promise<void> {
   }
 }
 
+// ── Export server pack ────────────────────────────────────────────────────────
+
+async function actionExportServerPack(): Promise<void> {
+  printSectionHeader("Export Server Pack (.zip)");
+  const dir = await pickPack("Select a pack to export");
+  if (dir === BACK) return;
+
+  blank();
+  const target = await pickServerPackTarget();
+  if (target === BACK) return;
+
+  const meta = await readPackMeta(dir);
+  const targetSuffix = target === "linux-graalvm" ? "linux-graalvm"
+    : target === "linux-openjdk" ? "linux"
+    : "windows";
+  const defaultOutput = path.join(
+    process.cwd(),
+    `${meta.packName}-${meta.minecraftVersion}-server-${targetSuffix}.zip`
+  );
+
+  blank();
+  printInfo(`Pack:   ${clr.highlight(meta.packName)}  (${meta.mods.length} mods · ${meta.loader} ${meta.minecraftVersion})`);
+  printInfo(`Target: ${clr.highlight(target)}`);
+  blank();
+  printInfo("The zip will contain:");
+  console.log(`  ${clr.muted("·")} mods/             — all mod .jar files`);
+  console.log(`  ${clr.muted("·")} user_jvm_args.txt  — MeowIce JVM flags (read by run.sh / run.bat)`);
+  console.log(`  ${clr.muted("·")} eula.txt           — pre-accepted EULA`);
+  console.log(`  ${clr.muted("·")} README.txt         — setup instructions`);
+  blank();
+
+  const outputRaw = await inputText(
+    `Output path  ${clr.muted(`[${defaultOutput}]`)}`,
+    defaultOutput
+  );
+  if (outputRaw === BACK) return;
+  const outputPath = outputRaw.trim() || defaultOutput;
+
+  blank();
+  try {
+    writeProgress(clr.muted("Building server zip..."));
+    const result = await exportToServerZip(meta, dir, outputPath, target, (done, total, name) => {
+      writeProgress(renderProgressBar(done, total) + "  " + clr.muted(name));
+    });
+    clearProgress();
+
+    printSuccess(`Server pack exported: ${clr.muted(outputPath)}`);
+    printInfo(`${result.modCount} mods included · target: ${target}`);
+
+    if (result.missing.length) {
+      blank();
+      printWarn(`${result.missing.length} mod file(s) missing from disk (not in zip):`);
+      for (const title of result.missing) {
+        console.log(`  ${clr.muted("–")} ${title}`);
+      }
+      printInfo(`Run ${clr.bold("Sync / download missing mods")} to fix this.`);
+    }
+
+    blank();
+    printInfo("Next steps:");
+    console.log(`  1. Unzip on your server`);
+    console.log(`  2. Download NeoForge ${meta.minecraftVersion} installer → ${clr.muted("https://neoforged.net/")}`);
+    console.log(`  3. Run: ${clr.bold("java -jar neoforge-*-installer.jar --install-server")}`);
+    if (target === "windows-openjdk") {
+      console.log(`  4. Run: ${clr.bold("run.bat")}`);
+    } else {
+      console.log(`  4. Run: ${clr.bold("bash run.sh")}`);
+    }
+    if (target === "linux-graalvm") {
+      blank();
+      printInfo(`GraalVM tip: install to ${clr.muted("/usr/lib/jvm/")} so Crafty Controller detects it:`);
+      console.log(`  ${clr.muted("sudo wget https://download.oracle.com/graalvm/24/latest/graalvm-jdk-24_linux-x64_bin.tar.gz -P /usr/lib/jvm/")}`);
+      console.log(`  ${clr.muted("sudo tar -xzf /usr/lib/jvm/graalvm-jdk-24_linux-x64_bin.tar.gz -C /usr/lib/jvm/")}`);
+      console.log(`  ${clr.muted("Then restart Crafty → select GraalVM in 'Override current Java Version'")}`);
+    }
+  } catch (e) {
+    clearProgress();
+    printError(`Export failed: ${e}`);
+  }
+}
+
 // ── Search & preview ──────────────────────────────────────────────────────────
 
 async function actionPreviewSearch(): Promise<void> {
@@ -970,6 +1134,7 @@ async function main(): Promise<void> {
         case "create":         await actionCreatePack();          break;
         case "import-mrpack":  await actionImportMrpack();        break;
         case "export-mrpack":  await actionExportMrpack();        break;
+        case "export-server":  await actionExportServerPack();    break;
         case "add-mods":       await actionAddMods();             break;
         case "remove-mods":    await actionRemoveMods();          break;
         case "view":           await actionViewPack();            break;
@@ -977,6 +1142,7 @@ async function main(): Promise<void> {
         case "update":         await actionUpdatePack();          break;
         case "check":          await actionCheckCompatibility();  break;
         case "mod-updates":    await actionCheckModUpdates();     break;
+        case "sync":           await actionSyncMods();            break;
         case "preview-search": await actionPreviewSearch();       break;
         case "settings":       await actionSettings();            break;
       }
